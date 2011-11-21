@@ -141,6 +141,12 @@ fill_connection (EAPMethod *parent, NMConnection *connection)
 	if (text && strlen (text))
 		g_object_set (s_8021x, NM_SETTING_802_1X_ANONYMOUS_IDENTITY, text, NULL);
 
+	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_peap_subject_entry"));
+	g_assert (widget);
+	text = gtk_entry_get_text (GTK_ENTRY (widget));
+	if (text && strlen (text))
+		g_object_set (s_8021x, NM_SETTING_802_1X_SUBJECT_MATCH, text, NULL);
+
 	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_peap_ca_cert_button"));
 	g_assert (widget);
 	filename = gtk_file_chooser_get_filename (GTK_FILE_CHOOSER (widget));
@@ -383,6 +389,13 @@ eap_method_peap_new (WirelessSecurity *ws_parent,
 	                  (GCallback) wireless_security_changed_cb,
 	                  ws_parent);
 
+	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_peap_subject_entry"));
+	if (s_8021x && nm_setting_802_1x_get_subject_match (s_8021x))
+		gtk_entry_set_text (GTK_ENTRY (widget), nm_setting_802_1x_get_subject_match (s_8021x));
+	g_signal_connect (G_OBJECT (widget), "changed",
+	                  (GCallback) wireless_security_changed_cb,
+	                  ws_parent);
+
 	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_peap_anon_identity_entry"));
 	if (s_8021x && nm_setting_802_1x_get_anonymous_identity (s_8021x))
 		gtk_entry_set_text (GTK_ENTRY (widget), nm_setting_802_1x_get_anonymous_identity (s_8021x));
@@ -394,6 +407,10 @@ eap_method_peap_new (WirelessSecurity *ws_parent,
 		widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_peap_anon_identity_label"));
 		gtk_widget_hide (widget);
 		widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_peap_anon_identity_entry"));
+		gtk_widget_hide (widget);
+		widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_peap_subject_label"));
+		gtk_widget_hide (widget);
+		widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_peap_subject_entry"));
 		gtk_widget_hide (widget);
 		widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_peap_ca_cert_label"));
 		gtk_widget_hide (widget);
