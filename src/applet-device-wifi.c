@@ -381,6 +381,11 @@ more_info_wifi_dialog_response_cb (GtkDialog *foo,
 	g_assert (connection);
 	g_assert (device);
 
+	if (nma_wireless_dialog_need_cert_probe (dialog, connection)) {
+		nma_wireless_dialog_probe_cert (dialog);
+		return;
+	}
+
 	info->callback (connection, TRUE, FALSE, info->callback_data);
 
 	/* Balance nma_wireless_dialog_get_connection() */

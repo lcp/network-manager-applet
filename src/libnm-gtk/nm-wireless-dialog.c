@@ -79,6 +79,10 @@ typedef struct {
 	GetSecretsInfo *secrets_info;
 
 	gboolean disposed;
+
+	/* For Server certificate probe */
+	guint cert_id;
+	guint timeout_id;
 } NMAWirelessDialogPrivate;
 
 #define D_NAME_COLUMN		0
@@ -109,6 +113,242 @@ nma_wireless_dialog_get_nag_ignored (NMAWirelessDialog *self)
 	g_return_val_if_fail (self != NULL, FALSE);
 
 	return NMA_WIRELESS_DIALOG_GET_PRIVATE (self)->nag_ignored;
+}
+
+gboolean
+nma_wireless_dialog_need_cert_probe (NMAWirelessDialog *self,
+                                     NMConnection *connection)
+{
+	NMAWirelessDialogPrivate *priv;
+	NMSetting8021x *s_8021x;
+	NMSetting8021xCKScheme cert_scheme;
+	int i, num_eap;
+	char *subject, *cert_hash;
+	gboolean need_ca = FALSE;
+
+	g_return_val_if_fail (self != NULL, FALSE);
+
+	priv = NMA_WIRELESS_DIALOG_GET_PRIVATE (self);
+
+	s_8021x = nm_connection_get_setting_802_1x (connection);
+	if (!s_8021x)
+		return FALSE;
+
+	num_eap = nm_setting_802_1x_get_num_eap_methods (s_8021x);
+	for (i = 0; i < num_eap; i++) {
+		const char *eap;
+		eap = nm_setting_802_1x_get_eap_method (s_8021x, i);
+		if (g_strcmp0 (eap, "ttls") == 0 || g_strcmp0 (eap, "peap") == 0) {
+			need_ca = TRUE;
+			break;
+		}
+	}
+
+	if (!need_ca)
+		return FALSE;
+
+	subject = (char *)g_object_get_data (G_OBJECT (connection), NMA_SERVER_SUBJECT);
+	cert_hash = (char *)g_object_get_data (G_OBJECT (connection), NMA_SERVER_CERT_HASH);
+	cert_scheme = nm_setting_802_1x_get_ca_cert_scheme (s_8021x);
+
+	if (   (!subject && !nm_setting_802_1x_get_subject_match (s_8021x))
+	    || (!cert_hash && (cert_scheme == NM_SETTING_802_1X_CK_SCHEME_UNKNOWN))) {
+		if (!priv->connection) {
+			priv->connection = connection;
+		} else if (priv->connection != connection) {
+			g_object_unref (priv->connection);
+			priv->connection = connection;
+		}
+		return TRUE;
+	}
+
+	return FALSE;
+}
+
+static gboolean
+show_probe_result_dialog (GtkWindow *parent,
+                          NMConnection *connection,
+                          NMSetting8021x *s_8021x,
+                          const char *subject,
+                          const char *cert_hash)
+{
+	NMSettingWireless *s_wireless;
+	GtkWidget *notify_dialog, *content;
+	GtkWidget *grid;
+	GtkWidget *context, *label, *entry;
+	char *ssid, *string;
+	int response_id;
+
+	s_wireless = nm_connection_get_setting_wireless (connection);
+	ssid = nm_utils_ssid_to_utf8 (nm_setting_wireless_get_ssid (s_wireless));
+
+	notify_dialog = gtk_dialog_new_with_buttons (ssid, parent,
+	                                             GTK_DIALOG_MODAL,
+	                                             GTK_STOCK_NO, GTK_RESPONSE_NO,
+	                                             GTK_STOCK_YES, GTK_RESPONSE_YES,
+	                                             NULL);
+	gtk_window_set_resizable (GTK_WINDOW (notify_dialog), FALSE);
+	content = gtk_dialog_get_content_area (GTK_DIALOG (notify_dialog));
+
+	grid = gtk_grid_new ();
+	gtk_grid_set_row_spacing (GTK_GRID (grid), 12);
+	gtk_container_set_border_width (GTK_CONTAINER (grid), 5);
+	gtk_container_add (GTK_CONTAINER (content), grid);
+
+	entry = gtk_entry_new ();
+	gtk_editable_set_editable (GTK_EDITABLE (entry), FALSE);
+	if (!cert_hash) {
+		string = g_strdup_printf ("<span weight=\"bold\" size=\"larger\">%s %s</span>\n\n%s\n%s",
+		                          _("Server Certificate Probed:"),
+		                          ssid,
+		                          _("The subject is going to be filled with the probe result."),
+		                          _("Do you agree?"));
+		label = gtk_label_new (_("Subject:"));
+		gtk_entry_set_text (GTK_ENTRY (entry), subject);
+	} else {
+		string = g_strdup_printf ("<span weight=\"bold\" size=\"larger\">%s %s</span>\n\n%s\n%s",
+		                          _("Server Certificate Probed:"),
+		                          ssid,
+		                          _("The CA certificate is going to be filled with the probed server hash."),
+		                          _("Do you agree?"));
+		label = gtk_label_new (_("CA Certificate:"));
+		gtk_entry_set_text (GTK_ENTRY (entry), cert_hash);
+	}
+	context = gtk_label_new (string);
+	g_free (string);
+	g_free (ssid);
+	gtk_label_set_line_wrap (GTK_LABEL (context), TRUE);
+	gtk_label_set_use_markup (GTK_LABEL (context), TRUE);
+	gtk_grid_attach (GTK_GRID (grid), context, 0, 0, 10, 1);
+	gtk_grid_attach (GTK_GRID (grid), label, 0, 1, 1, 1);
+	gtk_grid_attach (GTK_GRID (grid), entry, 1, 1, 9, 1);
+
+	gtk_widget_show_all (notify_dialog);
+
+	response_id = gtk_dialog_run (GTK_DIALOG (notify_dialog));
+
+	gtk_widget_destroy (notify_dialog);
+
+	if (response_id == GTK_RESPONSE_YES)
+		return TRUE;
+
+	return FALSE;
+}
+
+static void
+wireless_got_cert_cb (NMDeviceWifi *wifi,
+                      GHashTable *cert,
+                      gpointer user_data)
+{
+	NMAWirelessDialog *self = NMA_WIRELESS_DIALOG (user_data);
+	NMAWirelessDialogPrivate *priv;
+	NMSetting8021x *s_8021x;
+	const char *subject = NULL, *hash = NULL;
+	GValue *value;
+	gboolean response = FALSE;
+
+	priv = NMA_WIRELESS_DIALOG_GET_PRIVATE (self);
+
+	g_signal_handler_disconnect (NM_DEVICE_WIFI (priv->device), priv->cert_id);
+	if (priv->timeout_id) {
+		g_source_remove (priv->timeout_id);
+		priv->timeout_id = 0;
+	}
+
+	value = g_hash_table_lookup (cert, "subject");
+	if (value && G_VALUE_HOLDS_STRING (value))
+		subject = g_value_get_string (value);
+
+	value = g_hash_table_lookup (cert, "cert_hash");
+	if (value && G_VALUE_HOLDS_STRING (value))
+		hash = g_value_get_string (value);
+
+	if (!subject || !hash)
+		goto out;
+
+	s_8021x = nm_connection_get_setting_802_1x (priv->connection);
+	if (s_8021x) {
+		NMSetting8021xCKScheme cert_scheme;
+		char *hash_path = NULL;
+		gboolean ret;
+
+		cert_scheme = nm_setting_802_1x_get_ca_cert_scheme (s_8021x);
+		if (cert_scheme == NM_SETTING_802_1X_CK_SCHEME_UNKNOWN)
+			hash_path = g_strconcat ("hash://server/sha256/", hash, NULL);
+		ret = show_probe_result_dialog (gtk_window_get_transient_for (GTK_WINDOW (self)),
+		                                priv->connection,
+		                                s_8021x,
+		                                subject,
+		                                hash_path);
+		if (!ret) {
+			g_free (hash_path);
+			goto out;
+		}
+
+		g_object_set_data_full (G_OBJECT (priv->connection),
+		                        NMA_SERVER_SUBJECT, g_strdup (subject),
+		                        (GDestroyNotify) g_free);
+		g_object_set_data_full (G_OBJECT (priv->connection),
+		                        NMA_SERVER_CERT_HASH, hash_path,
+		                        (GDestroyNotify) g_free);
+		response = TRUE;
+	}
+out:
+	if (response)
+		gtk_dialog_response (GTK_DIALOG (self), GTK_RESPONSE_OK);
+	else
+		gtk_widget_show (GTK_WIDGET (self));
+}
+
+static gboolean
+wireless_cert_timeout_cb (gpointer user_data)
+{
+	NMAWirelessDialog *self = (NMAWirelessDialog *)user_data;
+	NMAWirelessDialogPrivate *priv;
+
+	priv = NMA_WIRELESS_DIALOG_GET_PRIVATE (self);
+
+	priv->timeout_id = 0;
+
+	g_signal_handler_disconnect (NM_DEVICE_WIFI (priv->device), priv->cert_id);
+
+	gtk_widget_show (GTK_WIDGET (self));
+
+	return FALSE;
+}
+
+gboolean
+nma_wireless_dialog_probe_cert (NMAWirelessDialog *self)
+{
+	NMAWirelessDialogPrivate *priv;
+	NMSettingWireless *s_wireless;
+	NMDeviceWifi *wifi;
+	guint id;
+
+	g_return_val_if_fail (self != NULL, FALSE);
+
+	priv = NMA_WIRELESS_DIALOG_GET_PRIVATE (self);
+        wifi = NM_DEVICE_WIFI (priv->device);
+
+	s_wireless = nm_connection_get_setting_wireless (priv->connection);
+	if (!s_wireless || !nm_device_wifi_probe_cert (wifi, nm_setting_wireless_get_ssid (s_wireless)))
+		return FALSE;
+
+	id = g_timeout_add_seconds (30,
+	                            (GSourceFunc)wireless_cert_timeout_cb,
+	                            (gpointer)self);
+	if (id <= 0) {
+		g_warning ("Failed to add timeout for server certificate probe");
+		return FALSE;
+	}
+	priv->timeout_id = id;
+
+	id = g_signal_connect (wifi, "cert-received", G_CALLBACK (wireless_got_cert_cb), self);
+	priv->cert_id = id;
+
+	gtk_widget_hide (GTK_WIDGET (self));
+
+	return TRUE;
 }
 
 static void
@@ -1187,6 +1427,9 @@ internal_init (NMAWirelessDialog *self,
 	 */
 	priv->revalidate_id = g_idle_add (revalidate, self);
 
+	priv->cert_id = 0;
+	priv->timeout_id = 0;
+
 	return TRUE;
 }
 
@@ -1236,6 +1479,8 @@ nma_wireless_dialog_get_connection (NMAWirelessDialog *self,
 		}
 
 		nm_connection_add_setting (connection, (NMSetting *) s_wireless);
+
+		priv->connection = g_object_ref (connection);
 	} else
 		connection = g_object_ref (priv->connection);
 

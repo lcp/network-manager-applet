@@ -76,5 +76,10 @@ void nma_wireless_dialog_set_nag_ignored (NMAWirelessDialog *dialog, gboolean ig
 
 gboolean nma_wireless_dialog_get_nag_ignored (NMAWirelessDialog *dialog);
 
+gboolean nma_wireless_dialog_need_cert_probe (NMAWirelessDialog *dialog,
+                                              NMConnection *connection);
+
+gboolean nma_wireless_dialog_probe_cert (NMAWirelessDialog *dialog);
+
 #endif	/* NMA_WIRELESS_DIALOG_H */
 
