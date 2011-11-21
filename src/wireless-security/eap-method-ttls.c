@@ -35,6 +35,8 @@
 #define I_NAME_COLUMN   0
 #define I_METHOD_COLUMN 1
 
+#define SUBJECT_NOTE _("<will be filled automatically>")
+
 struct _EAPMethodTTLS {
 	EAPMethod parent;
 
@@ -93,6 +95,10 @@ add_to_size_group (EAPMethod *parent, GtkSizeGroup *group)
 	g_assert (widget);
 	gtk_size_group_add_widget (group, widget);
 
+	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_ttls_subject_label"));
+	g_assert (widget);
+	gtk_size_group_add_widget (group, widget);
+
 	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_ttls_ca_cert_label"));
 	g_assert (widget);
 	gtk_size_group_add_widget (group, widget);
@@ -139,7 +145,7 @@ fill_connection (EAPMethod *parent, NMConnection *connection)
 	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_ttls_subject_entry"));
 	g_assert (widget);
 	text = gtk_entry_get_text (GTK_ENTRY (widget));
-	if (text && strlen (text))
+	if (text && strlen (text)  && g_strcmp0 (text, SUBJECT_NOTE) != 0)
 		g_object_set (s_8021x, NM_SETTING_802_1X_SUBJECT_MATCH, text, NULL);
 
 	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_ttls_ca_cert_button"));
@@ -314,6 +320,37 @@ update_secrets (EAPMethod *parent, NMConnection *connection)
 	                                         I_METHOD_COLUMN);
 }
 
+static gboolean
+subject_entry_focus_in_cb (GtkWidget *widget,
+                           GdkEvent  *event,
+                           gpointer user_data)
+{
+	const char *text = gtk_entry_get_text (GTK_ENTRY (widget));
+	if (g_strcmp0 (text, SUBJECT_NOTE) == 0) {
+		gtk_entry_set_text (GTK_ENTRY (widget), "");
+		gtk_widget_override_color (widget, GTK_STATE_FLAG_NORMAL, NULL);
+	}
+	return FALSE;
+}
+
+static gboolean
+subject_entry_focus_out_cb (GtkWidget *widget,
+                            GdkEvent  *event,
+                            gpointer user_data)
+{
+	const char *text = gtk_entry_get_text (GTK_ENTRY (widget));
+	GtkStyleContext *context;
+	GdkRGBA color;
+
+	if (!text || !strlen (text)) {
+		gtk_entry_set_text (GTK_ENTRY (widget), SUBJECT_NOTE);
+		context = gtk_widget_get_style_context (widget);
+		gtk_style_context_get_color (context, GTK_STATE_FLAG_INSENSITIVE, &color);
+		gtk_widget_override_color (widget, GTK_STATE_FLAG_NORMAL, &color);
+	}
+	return FALSE;
+}
+
 EAPMethodTTLS *
 eap_method_ttls_new (WirelessSecurity *ws_parent,
                      NMConnection *connection,
@@ -368,11 +405,41 @@ eap_method_ttls_new (WirelessSecurity *ws_parent,
 	}
 
 	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_ttls_subject_entry"));
-	if (s_8021x && nm_setting_802_1x_get_subject_match (s_8021x))
-		gtk_entry_set_text (GTK_ENTRY (widget), nm_setting_802_1x_get_subject_match (s_8021x));
+	if (s_8021x) {
+		const char *text = nm_setting_802_1x_get_subject_match (s_8021x);
+		if (!text) {
+			GtkStyleContext *context;
+			GdkRGBA color;
+			context = gtk_widget_get_style_context (widget);
+			gtk_style_context_get_color (context, GTK_STATE_FLAG_INSENSITIVE, &color);
+			gtk_widget_override_color (widget, GTK_STATE_FLAG_NORMAL, &color);
+			gtk_entry_set_text (GTK_ENTRY (widget), SUBJECT_NOTE);
+		} else {
+			gtk_entry_set_text (GTK_ENTRY (widget), text);
+		}
+		g_signal_connect (G_OBJECT (widget), "focus-in-event",
+		                  (GCallback) subject_entry_focus_in_cb,
+		                  NULL);
+		g_signal_connect (G_OBJECT (widget), "focus-out-event",
+		                  (GCallback) subject_entry_focus_out_cb,
+		                  NULL);
+	}
 	g_signal_connect (G_OBJECT (widget), "changed",
 	                  (GCallback) wireless_security_changed_cb,
 	                  ws_parent);
+
+	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_ttls_note_label"));
+	if (s_8021x) {
+		NMSetting8021xCKScheme cert_scheme;
+		cert_scheme = nm_setting_802_1x_get_ca_cert_scheme (s_8021x);
+		if (cert_scheme == NM_SETTING_802_1X_CK_SCHEME_HASH) {
+			gtk_label_set_text (GTK_LABEL (widget),
+			                    _("<b>Note:</b> Server hash is used instead of CA certificate"));
+			gtk_label_set_use_markup (GTK_LABEL (widget), TRUE);
+		} else {
+			gtk_widget_hide (widget);
+		}
+	}
 
 	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_ttls_anon_identity_entry"));
 	if (s_8021x && nm_setting_802_1x_get_anonymous_identity (s_8021x))
@@ -396,6 +463,8 @@ eap_method_ttls_new (WirelessSecurity *ws_parent,
 		widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_ttls_ca_cert_label"));
 		gtk_widget_hide (widget);
 		widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_ttls_ca_cert_button"));
+		gtk_widget_hide (widget);
+		widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_ttls_note_label"));
 		gtk_widget_hide (widget);
 		widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_ttls_inner_auth_label"));
 		gtk_widget_hide (widget);
