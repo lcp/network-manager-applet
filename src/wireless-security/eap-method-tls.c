@@ -33,6 +33,8 @@
 #include "wireless-security.h"
 #include "helpers.h"
 
+#define SUBJECT_NOTE _("<will be filled automatically>")
+
 struct _EAPMethodTLS {
 	EAPMethod parent;
 };
@@ -105,6 +107,10 @@ add_to_size_group (EAPMethod *parent, GtkSizeGroup *group)
 	g_assert (widget);
 	gtk_size_group_add_widget (group, widget);
 
+	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_tls_subject_label"));
+	g_assert (widget);
+	gtk_size_group_add_widget (group, widget);
+
 	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_tls_private_key_label"));
 	g_assert (widget);
 	gtk_size_group_add_widget (group, widget);
@@ -121,6 +127,7 @@ fill_connection (EAPMethod *parent, NMConnection *connection)
 	NMSetting8021x *s_8021x;
 	GtkWidget *widget;
 	char *ca_filename, *pk_filename, *cc_filename;
+	const char *subject;
 	const char *password = NULL;
 	GError *error = NULL;
 
@@ -202,6 +209,12 @@ fill_connection (EAPMethod *parent, NMConnection *connection)
 			g_clear_error (&error);
 		}
 	}
+
+	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_tls_subject_entry"));
+	g_assert (widget);
+	subject = gtk_entry_get_text (GTK_ENTRY (widget));
+	if (subject && strlen (subject)  && g_strcmp0 (subject, SUBJECT_NOTE) != 0)
+		g_object_set (s_8021x, NM_SETTING_802_1X_SUBJECT_MATCH, subject, NULL);
 }
 
 static void
@@ -370,6 +383,37 @@ update_secrets (EAPMethod *parent, NMConnection *connection)
 	}
 }
 
+static gboolean
+subject_entry_focus_in_cb (GtkWidget *widget,
+                           GdkEvent  *event,
+                           gpointer user_data)
+{
+	const char *text = gtk_entry_get_text (GTK_ENTRY (widget));
+	if (g_strcmp0 (text, SUBJECT_NOTE) == 0) {
+		gtk_entry_set_text (GTK_ENTRY (widget), "");
+		gtk_widget_override_color (widget, GTK_STATE_FLAG_NORMAL, NULL);
+	}
+	return FALSE;
+}
+
+static gboolean
+subject_entry_focus_out_cb (GtkWidget *widget,
+                            GdkEvent  *event,
+                            gpointer user_data)
+{
+	const char *text = gtk_entry_get_text (GTK_ENTRY (widget));
+	GtkStyleContext *context;
+	GdkRGBA color;
+
+	if (!text || !strlen (text)) {
+		gtk_entry_set_text (GTK_ENTRY (widget), SUBJECT_NOTE);
+		context = gtk_widget_get_style_context (widget);
+		gtk_style_context_get_color (context, GTK_STATE_FLAG_INSENSITIVE, &color);
+		gtk_widget_override_color (widget, GTK_STATE_FLAG_NORMAL, &color);
+	}
+	return FALSE;
+}
+
 EAPMethodTLS *
 eap_method_tls_new (WirelessSecurity *ws_parent,
                     NMConnection *connection,
@@ -418,6 +462,31 @@ eap_method_tls_new (WirelessSecurity *ws_parent,
 	                  phase2 ? nm_setting_802_1x_get_phase2_ca_cert_scheme : nm_setting_802_1x_get_ca_cert_scheme,
 	                  phase2 ? nm_setting_802_1x_get_phase2_ca_cert_path : nm_setting_802_1x_get_ca_cert_path,
 	                  FALSE, FALSE);
+
+	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_tls_subject_entry"));
+	if (s_8021x) {
+		const char *text = nm_setting_802_1x_get_subject_match (s_8021x);
+		if (!text) {
+			GtkStyleContext *context;
+			GdkRGBA color;
+			context = gtk_widget_get_style_context (widget);
+			gtk_style_context_get_color (context, GTK_STATE_FLAG_INSENSITIVE, &color);
+			gtk_widget_override_color (widget, GTK_STATE_FLAG_NORMAL, &color);
+			gtk_entry_set_text (GTK_ENTRY (widget), SUBJECT_NOTE);
+		} else {
+			gtk_entry_set_text (GTK_ENTRY (widget), text);
+		}
+		g_signal_connect (G_OBJECT (widget), "focus-in-event",
+		                  (GCallback) subject_entry_focus_in_cb,
+		                  NULL);
+		g_signal_connect (G_OBJECT (widget), "focus-out-event",
+		                  (GCallback) subject_entry_focus_out_cb,
+		                  NULL);
+	}
+	g_signal_connect (G_OBJECT (widget), "changed",
+	                  (GCallback) wireless_security_changed_cb,
+	                  ws_parent);
+
 	setup_filepicker (parent->builder, "eap_tls_private_key_button",
 	                  _("Choose your private key..."),
 	                  ws_parent, parent, s_8021x,
@@ -455,6 +524,10 @@ eap_method_tls_new (WirelessSecurity *ws_parent,
 		widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_tls_ca_cert_label"));
 		gtk_widget_hide (widget);
 		widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_tls_ca_cert_button"));
+		gtk_widget_hide (widget);
+		widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_tls_subject_label"));
+		gtk_widget_hide (widget);
+		widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_tls_subject_entry"));
 		gtk_widget_hide (widget);
 	}
 

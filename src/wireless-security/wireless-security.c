@@ -472,9 +472,11 @@ ws_802_1x_fill_connection (WirelessSecurity *sec,
 	NMSettingWireless *s_wireless;
 	NMSettingWirelessSecurity *s_wireless_sec;
 	NMSetting8021x *s_8021x;
+	NMSetting8021xCKScheme cert_scheme;
 	EAPMethod *eap = NULL;
 	GtkTreeModel *model;
 	GtkTreeIter iter;
+	char *subject, *cert_hash;
 
 	s_wireless = nm_connection_get_setting_wireless (connection);
 	g_assert (s_wireless);
@@ -497,6 +499,26 @@ ws_802_1x_fill_connection (WirelessSecurity *sec,
 
 	eap_method_fill_connection (eap, connection);
 	eap_method_unref (eap);
+
+	/* Fetch subject and cert_hash from connection */
+	subject = (char *)g_object_get_data (G_OBJECT (connection), NMA_SERVER_SUBJECT);
+	if (subject && !nm_setting_802_1x_get_subject_match (s_8021x))
+		g_object_set (s_8021x, NM_SETTING_802_1X_SUBJECT_MATCH, subject, NULL);
+
+	cert_hash = (char *)g_object_get_data (G_OBJECT (connection), NMA_SERVER_CERT_HASH);
+	cert_scheme = nm_setting_802_1x_get_ca_cert_scheme (s_8021x);
+	if (cert_hash && cert_scheme == NM_SETTING_802_1X_CK_SCHEME_UNKNOWN) {
+		NMSetting8021xCKFormat format = NM_SETTING_802_1X_CK_FORMAT_UNKNOWN;
+		GError *error = NULL;
+		if (!nm_setting_802_1x_set_ca_cert (s_8021x,
+		                                    cert_hash,
+		                                    NM_SETTING_802_1X_CK_SCHEME_HASH,
+		                                    &format,
+		                                    &error)) {
+			g_warning ("Couldn't set CA certificate '%s': %s", cert_hash, error ? error->message : "(unknown)");
+			g_error_free (error);
+		}
+	}
 }
 
 void

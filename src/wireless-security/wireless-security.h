@@ -28,6 +28,9 @@
 
 #include <nm-connection.h>
 
+#define NMA_SERVER_SUBJECT "nma-server-subject"
+#define NMA_SERVER_CERT_HASH "mna-server-cert-hash"
+
 typedef struct _WirelessSecurity WirelessSecurity;
 
 typedef void (*WSChangedFunc) (WirelessSecurity *sec, gpointer user_data);
