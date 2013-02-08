@@ -83,3 +83,15 @@ nma_wireless_dialog_nag_user (NMAWirelessDialog *self)
 {
 	return nma_wifi_dialog_nag_user ((NMAWifiDialog *)self);
 }
+
+gboolean
+nma_wireless_dialog_need_cert_probe (NMAWirelessDialog *self)
+{
+	return nma_wifi_dialog_need_cert_probe ((NMAWifiDialog *)self);
+}
+
+gboolean
+nma_wireless_dialog_probe_cert (NMAWirelessDialog *self)
+{
+	return nma_wifi_dialog_probe_cert ((NMAWifiDialog *)self);
+}

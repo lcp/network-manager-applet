@@ -89,5 +89,11 @@ void nma_wireless_dialog_set_nag_ignored (NMAWirelessDialog *dialog, gboolean ig
 GLIB_DEPRECATED_FOR(nma_wifi_dialog_get_nag_ignored)
 gboolean nma_wireless_dialog_get_nag_ignored (NMAWirelessDialog *dialog);
 
+GLIB_DEPRECATED_FOR(nma_wifi_dialog_need_cert_probe)
+gboolean nma_wireless_dialog_need_cert_probe (NMAWirelessDialog *dialog);
+
+GLIB_DEPRECATED_FOR(nma_wifi_dialog_probe_cert)
+gboolean nma_wireless_dialog_probe_cert (NMAWirelessDialog *dialog);
+
 #endif	/* NMA_WIRELESS_DIALOG_H */
 

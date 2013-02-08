@@ -76,5 +76,9 @@ void nma_wifi_dialog_set_nag_ignored (NMAWifiDialog *dialog, gboolean ignored);
 
 gboolean nma_wifi_dialog_get_nag_ignored (NMAWifiDialog *dialog);
 
+gboolean nma_wifi_dialog_need_cert_probe (NMAWifiDialog *dialog);
+
+gboolean nma_wifi_dialog_probe_cert (NMAWifiDialog *dialog);
+
 #endif	/* NMA_WIFI_DIALOG_H */
 
