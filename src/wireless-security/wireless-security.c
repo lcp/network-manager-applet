@@ -471,15 +471,22 @@ ws_802_1x_fill_connection (WirelessSecurity *sec,
 	GtkWidget *widget;
 	NMSettingWireless *s_wireless;
 	NMSettingWirelessSecurity *s_wireless_sec;
-	NMSetting8021x *s_8021x;
+	NMSetting8021x *s_8021x, *old_s_8021x;
 	NMSetting8021xCKScheme cert_scheme;
 	EAPMethod *eap = NULL;
 	GtkTreeModel *model;
 	GtkTreeIter iter;
 	char *subject, *cert_hash;
+	char *old_hash = NULL;
 
 	s_wireless = nm_connection_get_setting_wireless (connection);
 	g_assert (s_wireless);
+
+	old_s_8021x = nm_connection_get_setting_802_1x (connection);
+	if (old_s_8021x &&
+	    nm_setting_802_1x_get_ca_cert_scheme (old_s_8021x) == NM_SETTING_802_1X_CK_SCHEME_HASH) {
+		old_hash = g_strdup (nm_setting_802_1x_get_ca_cert_hash (old_s_8021x));
+	}
 
 	g_object_set (s_wireless, NM_SETTING_WIRELESS_SEC, NM_SETTING_WIRELESS_SECURITY_SETTING_NAME, NULL);
 
@@ -490,6 +497,21 @@ ws_802_1x_fill_connection (WirelessSecurity *sec,
 	/* Blow away the old 802.1x setting by adding a clear one */
 	s_8021x = (NMSetting8021x *) nm_setting_802_1x_new ();
 	nm_connection_add_setting (connection, (NMSetting *) s_8021x);
+
+	if (old_hash) {
+		NMSetting8021xCKFormat format = NM_SETTING_802_1X_CK_FORMAT_UNKNOWN;
+		GError *error = NULL;
+		if (!nm_setting_802_1x_set_ca_cert (s_8021x,
+		                                    old_hash,
+		                                    NM_SETTING_802_1X_CK_SCHEME_HASH,
+		                                    &format,
+		                                    &error)) {
+			g_warning ("Couldn't set CA certificate '%s': %s", old_hash,
+			           error ? error->message : "(unknown)");
+			g_error_free (error);
+		}
+		g_free (old_hash);
+	}
 
 	widget = GTK_WIDGET (gtk_builder_get_object (sec->builder, combo_name));
 	model = gtk_combo_box_get_model (GTK_COMBO_BOX (widget));

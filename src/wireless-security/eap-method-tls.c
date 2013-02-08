@@ -124,6 +124,7 @@ static void
 fill_connection (EAPMethod *parent, NMConnection *connection)
 {
 	NMSetting8021xCKFormat format = NM_SETTING_802_1X_CK_FORMAT_UNKNOWN;
+	NMSetting8021xCKScheme cert_scheme;
 	NMSetting8021x *s_8021x;
 	GtkWidget *widget;
 	char *ca_filename, *pk_filename, *cc_filename;
@@ -204,9 +205,12 @@ fill_connection (EAPMethod *parent, NMConnection *connection)
 			g_clear_error (&error);
 		}
 	} else {
-		if (!nm_setting_802_1x_set_ca_cert (s_8021x, ca_filename, NM_SETTING_802_1X_CK_SCHEME_PATH, &format, &error)) {
-			g_warning ("Couldn't read CA certificate '%s': %s", ca_filename, error ? error->message : "(unknown)");
-			g_clear_error (&error);
+		cert_scheme = nm_setting_802_1x_get_ca_cert_scheme (s_8021x);
+		if (ca_filename || cert_scheme != NM_SETTING_802_1X_CK_SCHEME_HASH) {
+			if (!nm_setting_802_1x_set_ca_cert (s_8021x, ca_filename, NM_SETTING_802_1X_CK_SCHEME_PATH, &format, &error)) {
+				g_warning ("Couldn't read CA certificate '%s': %s", ca_filename, error ? error->message : "(unknown)");
+				g_clear_error (&error);
+			}
 		}
 	}
 

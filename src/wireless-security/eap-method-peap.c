@@ -127,6 +127,7 @@ fill_connection (EAPMethod *parent, NMConnection *connection)
 {
 	NMSetting8021x *s_8021x;
 	NMSetting8021xCKFormat format = NM_SETTING_802_1X_CK_FORMAT_UNKNOWN;
+	NMSetting8021xCKScheme cert_scheme;
 	GtkWidget *widget;
 	const char *text;
 	char *filename;
@@ -156,9 +157,12 @@ fill_connection (EAPMethod *parent, NMConnection *connection)
 	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_peap_ca_cert_button"));
 	g_assert (widget);
 	filename = gtk_file_chooser_get_filename (GTK_FILE_CHOOSER (widget));
-	if (!nm_setting_802_1x_set_ca_cert (s_8021x, filename, NM_SETTING_802_1X_CK_SCHEME_PATH, &format, &error)) {
-		g_warning ("Couldn't read CA certificate '%s': %s", filename, error ? error->message : "(unknown)");
-		g_clear_error (&error);
+	cert_scheme = nm_setting_802_1x_get_ca_cert_scheme (s_8021x);
+	if (filename || cert_scheme != NM_SETTING_802_1X_CK_SCHEME_HASH) {
+		if (!nm_setting_802_1x_set_ca_cert (s_8021x, filename, NM_SETTING_802_1X_CK_SCHEME_PATH, &format, &error)) {
+			g_warning ("Couldn't read CA certificate '%s': %s", filename, error ? error->message : "(unknown)");
+			g_clear_error (&error);
+		}
 	}
 
 	widget = GTK_WIDGET (gtk_builder_get_object (parent->builder, "eap_peap_version_combo"));
